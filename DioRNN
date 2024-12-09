@@ -1,0 +1,70 @@
+import zipfile
+import os
+
+# Extraindo o dataset manualmente (supondo que você fez o upload para o Colab)
+zip_path = "/content/kagglecatsanddogs_3367a.zip"  # Caminho do arquivo ZIP
+with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+    zip_ref.extractall("cats_and_dogs")
+
+# Importando bibliotecas necessárias
+import tensorflow as tf
+import tensorflow_datasets as tfds
+from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras import layers, models
+from tensorflow.keras.optimizers import Adam
+
+# Configuração de parâmetros
+IMG_SIZE = (128, 128)
+BATCH_SIZE = 32
+EPOCHS = 10
+
+# Carregando o dataset Cats vs Dogs do TensorFlow Datasets
+(raw_train, raw_val), metadata = tfds.load(
+    "cats_vs_dogs",
+    split=["train[:80%]", "train[80%:]"],  # 80% para treino, 20% para validação
+    as_supervised=True,  # Retorna os dados como pares (imagem, rótulo)
+    with_info=True
+)
+
+# Função de pré-processamento
+def preprocess(image, label):
+    image = tf.image.resize(image, IMG_SIZE)  # Redimensiona as imagens
+    image = image / 255.0  # Normaliza os pixels para o intervalo [0, 1]
+    return image, label
+
+# Aplicando pré-processamento nos dados
+train = raw_train.map(preprocess).shuffle(1000).batch(BATCH_SIZE).prefetch(1)
+val = raw_val.map(preprocess).batch(BATCH_SIZE).prefetch(1)
+
+# Carregando o modelo pré-treinado MobileNetV2
+base_model = MobileNetV2(input_shape=(128, 128, 3), include_top=False, weights='imagenet')
+base_model.trainable = False  # Congela os pesos do modelo base
+
+# Adicionando camadas personalizadas
+model = models.Sequential([
+    base_model,
+    layers.GlobalAveragePooling2D(),
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.5),
+    layers.Dense(1, activation='sigmoid')  # Saída binária
+])
+
+# Compilando o modelo
+model.compile(optimizer=Adam(learning_rate=0.001),
+              loss='binary_crossentropy',
+              metrics=['accuracy'])
+
+# Treinando o modelo
+history = model.fit(
+    train,
+    validation_data=val,
+    epochs=EPOCHS
+)
+
+# Avaliando o modelo
+loss, accuracy = model.evaluate(val)
+print(f"Loss: {loss}")
+print(f"Accuracy: {accuracy}")
+
+# Salvando o modelo treinado
+model.save("cats_vs_dogs_model.h5")
